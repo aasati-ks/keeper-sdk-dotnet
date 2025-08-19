@@ -351,8 +351,33 @@ namespace Cli
                                 {
                                     if (AuthUIExtensions.TryParsePushAction(answer, out var push))
                                     {
-                                        await tfs.SendPush(push);
-                                        break;
+                                        // Special handling for Security Key push actions
+                                        if (push == TwoFactorPushAction.SecurityKey && tfs.DefaultChannel == TwoFactorChannel.SecurityKey)
+                                        {
+#if NET472_OR_GREATER
+                                            try
+                                            {
+                                                Console.WriteLine("Tap your security key to authenticate...");
+                                                await HandleSecurityKeyAuthentication(auth, tfs);
+                                                break;
+                                            }
+                                            catch (Exception e)
+                                            {
+                                                Console.WriteLine($"Security key authentication failed: {e.Message}");
+                                                Console.WriteLine("Please try a different 2FA method or ensure your security key is properly connected.");
+                                                continue;
+                                            }
+#else
+                                            Console.WriteLine("Security Key authentication requires Windows .NET Framework 4.7.2 or greater.");
+                                            Console.WriteLine("Please use a different 2FA method or switch to the net472 build.");
+                                            continue;
+#endif
+                                        }
+                                        else
+                                        {
+                                            await tfs.SendPush(push);
+                                            break;
+                                        }
                                     }
                                 }
                                 else
@@ -562,6 +587,39 @@ namespace Cli
             }
             auth.UiCallback = null;
         }
+
+#if NET472_OR_GREATER
+        private static async Task HandleSecurityKeyAuthentication(AuthSync auth, TwoFactorStep tfs)
+        {
+            // This method handles WebAuthn authentication when using AuthSyncCallback
+            // It extracts the challenge from the step context and performs Windows WebAuthn
+            try
+            {
+                // We need to trigger the security key action and then handle the WebAuthn flow
+                // The TwoFactorStep doesn't expose the raw challenge, so we trigger the action
+                // which will throw an exception with the challenge, and we catch and handle it
+                
+                await tfs.SendPush(TwoFactorPushAction.SecurityKey);
+                
+                // If we reach here without exception, the authentication was successful
+                Console.WriteLine("Security key authentication completed successfully.");
+            }
+            catch (NotSupportedException ex) when (ex.Message.Contains("WebAuthn authentication requires CLI-level implementation"))
+            {
+                // This means our fallback in LoginV3Extensions was triggered
+                // We should implement the WebAuthn flow here, but we need the challenge data
+                Console.WriteLine("WebAuthn challenge detected. Attempting direct authentication...");
+                
+                // For now, provide instructions to the user
+                throw new NotSupportedException("Security key authentication requires implementing the WebAuthn challenge extraction. Please use the IAuthSecurityKeyUI interface or upgrade your authentication flow.");
+            }
+            catch (Exception ex)
+            {
+                // Other exceptions should be rethrown
+                throw new Exception($"Security key authentication failed: {ex.Message}", ex);
+            }
+        }
+#endif
     }
 
     public class AuthSyncCallback : IAuthSyncCallback

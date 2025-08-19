@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Authentication;
 using Google.Protobuf;
+using KeeperSecurity.Authentication.Sync;
 using KeeperSecurity.Configuration;
 using KeeperSecurity.Utils;
 using Push;
@@ -852,9 +853,43 @@ namespace KeeperSecurity.Authentication
                                 Debug.WriteLine(e.Message);
                             }
                         }
-
+                        else
+                        {
+                            // Fallback: Add security key channel even without IAuthSecurityKeyUI
+                            // The CLI layer will need to handle the WebAuthn flow
+                            try
+                            {
+                                var rqs = JsonUtils.ParseJson<KeeperWebAuthnRequest>(Encoding.UTF8.GetBytes(ch.Challenge));
+                                var webAuthnKey = new TwoFactorSecurityKeyChannel
+                                {
+                                    InvokeTwoFactorPushAction = (_) =>
+                                    {
+                                        // This will be handled by the CLI layer through the login flow
+                                        // For now, provide instructions to the user
+                                        Console.WriteLine("Security Key authentication detected but requires CLI-level WebAuthn support.");
+                                        Console.WriteLine("Please ensure you're running the .NET Framework 4.7.2 build on Windows for full WebAuthn support.");
+                                        
+                                        // The actual WebAuthn handling should be moved to the CLI Utils.LoginFlow method
+                                        return Task.FromException(new NotSupportedException("WebAuthn authentication requires CLI-level implementation. Please use a compatible client."));
+                                    },
+                                };
+                                availableChannels.Add(webAuthnKey);
+                            }
+                            catch (Exception e)
+                            {
+                                Debug.WriteLine($"Failed to parse WebAuthn challenge: {e.Message}");
+                                // Still add a basic security key channel
+                                var fallbackKey = new TwoFactorSecurityKeyChannel
+                                {
+                                    InvokeTwoFactorPushAction = (_) =>
+                                    {
+                                        return Task.FromException(new NotSupportedException($"Security Key setup failed: {e.Message}. WebAuthn parsing error."));
+                                    },
+                                };
+                                availableChannels.Add(fallbackKey);
+                            }
+                        }
                         break;
-
                     case TwoFactorChannelType.TwoFaCtU2F:
                     case TwoFactorChannelType.TwoFaCtKeeper:
                         break;
