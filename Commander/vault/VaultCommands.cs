@@ -44,6 +44,79 @@ namespace Commander
             }
         }
 
+        public void PrintTree(FolderNode folder, string indent, bool last, TreeCommandOptions options)
+        {
+            var isRoot = string.IsNullOrEmpty(indent);
+            var folderDisplay = folder.Name;
+            
+            if (options.Verbose)
+            {
+                folderDisplay += $" (ID: {folder.FolderUid})";
+            }
+            
+            var isSharedFolder = !string.IsNullOrEmpty(folder.FolderUid) && 
+                                Vault.SharedFolders.Any(sf => sf.Uid == folder.FolderUid);
+            if (isSharedFolder)
+            {
+                folderDisplay += " [Shared]";
+            }
+
+            Console.WriteLine(indent + (isRoot ? "" : "+-- ") + folderDisplay);
+            indent += isRoot ? " " : (last ? "    " : "|   ");
+
+            var subfolders = new List<FolderNode>();
+            foreach (var t in folder.Subfolders)
+            {
+                if (Vault.TryGetFolder(t, out var node))
+                {
+                    subfolders.Add(node);
+                }
+            }
+
+            subfolders.Sort((x, y) => string.Compare(x.Name, y.Name, StringComparison.CurrentCultureIgnoreCase));
+
+            if (options.Record)
+            {
+                var records = new List<KeeperRecord>();
+                foreach (var recordUid in folder.Records)
+                {
+                    if (Vault.TryGetKeeperRecord(recordUid, out var record))
+                    {
+                        if (record.Version == 2 || record.Version == 3)
+                        {
+                            records.Add(record);
+                        }
+                    }
+                }
+
+                records.Sort((x, y) => string.Compare(x.Title, y.Title, StringComparison.CurrentCultureIgnoreCase));
+
+                for (var i = 0; i < records.Count; i++)
+                {
+                    var record = records[i];
+                    var recordDisplay = string.IsNullOrEmpty(record.Title) ? record.Uid : record.Title;
+                    
+                    if (options.Verbose)
+                    {
+                        recordDisplay += $" (ID: {record.Uid})";
+                    }
+                    
+                    var isLastRecord = (i == records.Count - 1) && (subfolders.Count == 0);
+                    
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine(indent + "+-- " + recordDisplay + " [Record]");
+                    Console.ResetColor();
+                }
+            }
+
+            for (var i = 0; i < subfolders.Count; i++)
+            {
+                var node = subfolders[i];
+                var isLastFolder = i == subfolders.Count - 1;
+                PrintTree(node, indent, isLastFolder, options);
+            }
+        }
+
         public bool TryResolvePath(string path, out FolderNode node)
         {
             var res = TryResolvePath(path, out node, out var text);
@@ -163,7 +236,7 @@ namespace Commander
                 new ParseableCommand<TreeCommandOptions>
                 {
                     Order = 13,
-                    Description = "Display folder structure",
+                    Description = "Display folder structure with optional records and verbose output",
                     Action = context.TreeCommand
                 });
 
@@ -612,7 +685,22 @@ namespace Commander
 
         private static Task TreeCommand(this VaultContext context, TreeCommandOptions options)
         {
-            context.PrintTree(context.Vault.RootFolder, "", true);
+            FolderNode startFolder = context.Vault.RootFolder;
+            
+            if (!string.IsNullOrEmpty(options.Folder))
+            {
+                if (context.TryResolvePath(options.Folder, out var targetFolder))
+                {
+                    startFolder = targetFolder;
+                }
+                else
+                {
+                    Console.WriteLine($"Invalid folder: {options.Folder}");
+                    return Task.FromResult(false);
+                }
+            }
+
+            context.PrintTree(startFolder, "", true, options);
             return Task.FromResult(true);
         }
 
@@ -994,6 +1082,12 @@ namespace Commander
     {
         [Value(0, Required = false, MetaName = "folder", HelpText = "folder path or UID")]
         public string Folder { get; set; }
+
+        [Option('v', "verbose", Required = false, Default = false, HelpText = "verbose output with IDs")]
+        public bool Verbose { get; set; }
+
+        [Option('r', "record", Required = false, Default = false, HelpText = "show records along with folders")]
+        public bool Record { get; set; }
     }
 
     class SyncDownOptions
