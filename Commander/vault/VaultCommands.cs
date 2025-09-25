@@ -58,7 +58,17 @@ namespace Commander
                                 Vault.SharedFolders.Any(sf => sf.Uid == folder.FolderUid);
             if (isSharedFolder)
             {
-                folderDisplay += " [Shared]";
+                folderDisplay += " [SHARED]";
+                
+                if (options.Shares)
+                {
+                    var sharedFolder = Vault.SharedFolders.FirstOrDefault(sf => sf.Uid == folder.FolderUid);
+                    if (sharedFolder != null)
+                    {
+                        var permissionInfo = GetPermissionInfo(sharedFolder);
+                        folderDisplay += $" {permissionInfo}";
+                    }
+                }
             }
 
             Console.WriteLine(indent + (isRoot ? "" : "+-- ") + folderDisplay);
@@ -201,6 +211,67 @@ namespace Commander
             }
 
             return true;
+        }
+
+        private string GetPermissionInfo(SharedFolder sharedFolder)
+        {
+            var permissions = new List<string>();
+            
+            var defaultPermissions = GetPermissionsString(sharedFolder.DefaultCanEdit, sharedFolder.DefaultCanShare, 
+                sharedFolder.DefaultManageRecords, sharedFolder.DefaultManageUsers);
+            permissions.Add($"default:{defaultPermissions}");
+            
+            var currentUserEmail = Vault.Auth.Username;
+            var currentUserPermission = sharedFolder.UsersPermissions.FirstOrDefault(up => up.Name == currentUserEmail);
+            
+            string userPermissions;
+            if (currentUserPermission != null)
+            {
+                var canEdit = sharedFolder.DefaultCanEdit;
+                var canShare = sharedFolder.DefaultCanShare;
+                var manageRecords = currentUserPermission.ManageRecords;
+                var manageUsers = currentUserPermission.ManageUsers;
+                userPermissions = GetPermissionsString(canEdit, canShare, manageRecords, manageUsers);
+            }
+            else
+            {
+                userPermissions = defaultPermissions;
+            }
+            
+            permissions.Add($"user:{userPermissions}");
+            
+            var usersList = new List<string>();
+            foreach (var userPerm in sharedFolder.UsersPermissions.Where(up => up.Name != currentUserEmail))
+            {
+                var canEdit = sharedFolder.DefaultCanEdit;
+                var canShare = sharedFolder.DefaultCanShare;
+                var manageRecords = userPerm.ManageRecords;
+                var manageUsers = userPerm.ManageUsers;
+                var userSpecificPermissions = GetPermissionsString(canEdit, canShare, manageRecords, manageUsers);
+                
+                usersList.Add($"{userPerm.Name}:{userSpecificPermissions}");
+            }
+            
+            if (usersList.Count > 0)
+            {
+                permissions.Add($"users:[{string.Join(", ", usersList)}]");
+            }
+            
+            return $"({string.Join("; ", permissions)})";
+        }
+
+        private string GetPermissionsString(bool canEdit, bool canShare, bool manageRecords, bool manageUsers)
+        {
+            var permissionList = new List<string>();
+            
+            if (canEdit) permissionList.Add("CE");
+            if (canShare) permissionList.Add("CS");
+            if (manageRecords) permissionList.Add("MR");
+            if (manageUsers) permissionList.Add("MU");
+            
+            if (permissionList.Count == 0) permissionList.Add("RO");
+            
+            return string.Join(",", permissionList);
         }
     }
 
@@ -700,6 +771,20 @@ namespace Commander
                 }
             }
 
+            // Display the Share Permissions Key if -s flag is used and -hk is not used
+            if (options.Shares && !options.HideSharedKeys)
+            {
+                Console.WriteLine("Share Permissions Key:");
+                Console.WriteLine("======================");
+                Console.WriteLine("RO = Read-Only");
+                Console.WriteLine("MU = Can Manage Users");
+                Console.WriteLine("MR = Can Manage Records");
+                Console.WriteLine("CE = Can Edit");
+                Console.WriteLine("CS = Can Share");
+                Console.WriteLine("======================");
+                Console.WriteLine();
+            }
+
             context.PrintTree(startFolder, "", true, options);
             return Task.FromResult(true);
         }
@@ -1088,6 +1173,12 @@ namespace Commander
 
         [Option('r', "record", Required = false, Default = false, HelpText = "show records along with folders")]
         public bool Record { get; set; }
+
+        [Option('s', "shares", Required = false, Default = false, HelpText = "show shares along with folders")]
+        public bool Shares { get; set; }
+
+        [Option('h', "hide-shared-keys", Required = false, Default = false, HelpText = "hide share permissions key (valid only when used with --shares flag, which shows key by default)")]
+        public bool HideSharedKeys { get; set; }
     }
 
     class SyncDownOptions
