@@ -21,35 +21,12 @@ namespace Commander
             Vault = vault;
         }
 
-        public void PrintTree(FolderNode folder, string indent, bool last)
-        {
-            var isRoot = string.IsNullOrEmpty(indent);
-            Console.WriteLine(indent + (isRoot ? "" : "+-- ") + folder.Name);
-            indent += isRoot ? " " : (last ? "    " : "|   ");
-
-            var subfolders = new List<FolderNode>();
-            foreach (var t in folder.Subfolders)
-            {
-                if (Vault.TryGetFolder(t, out var node))
-                {
-                    subfolders.Add(node);
-                }
-            }
-
-            subfolders.Sort((x, y) => string.Compare(x.Name, y.Name, StringComparison.CurrentCultureIgnoreCase));
-            for (var i = 0; i < subfolders.Count; i++)
-            {
-                var node = subfolders[i];
-                PrintTree(node, indent, i == subfolders.Count - 1);
-            }
-        }
-
-        public void PrintTree(FolderNode folder, string indent, bool last, TreeCommandOptions options)
+        public void PrintTree(FolderNode folder, string indent, bool last, TreeCommandOptions options = null)
         {
             var isRoot = string.IsNullOrEmpty(indent);
             var folderDisplay = folder.Name;
             
-            if (options.Verbose)
+            if (options?.Verbose == true)
             {
                 folderDisplay += $" (ID: {folder.FolderUid})";
             }
@@ -58,16 +35,19 @@ namespace Commander
                                 Vault.SharedFolders.Any(sf => sf.Uid == folder.FolderUid);
             if (isSharedFolder)
             {
-                folderDisplay += " [SHARED]";
-                
-                if (options.Shares)
+                if (options?.Shares == true)
                 {
+                    folderDisplay += " [SHARED]";
                     var sharedFolder = Vault.SharedFolders.FirstOrDefault(sf => sf.Uid == folder.FolderUid);
                     if (sharedFolder != null)
                     {
                         var permissionInfo = GetPermissionInfo(sharedFolder);
                         folderDisplay += $" {permissionInfo}";
                     }
+                }
+                else if (options != null)
+                {
+                    folderDisplay += " [Shared]";
                 }
             }
 
@@ -85,7 +65,7 @@ namespace Commander
 
             subfolders.Sort((x, y) => string.Compare(x.Name, y.Name, StringComparison.CurrentCultureIgnoreCase));
 
-            if (options.Record)
+            if (options?.Record == true)
             {
                 var records = new List<KeeperRecord>();
                 foreach (var recordUid in folder.Records)
@@ -106,7 +86,7 @@ namespace Commander
                     var record = records[i];
                     var recordDisplay = string.IsNullOrEmpty(record.Title) ? record.Uid : record.Title;
                     
-                    if (options.Verbose)
+                    if (options?.Verbose == true)
                     {
                         recordDisplay += $" (ID: {record.Uid})";
                     }
@@ -771,7 +751,6 @@ namespace Commander
                 }
             }
 
-            // Display the Share Permissions Key if -s flag is used and -hk is not used
             if (options.Shares && !options.HideSharedKeys)
             {
                 Console.WriteLine("Share Permissions Key:");
@@ -1168,16 +1147,16 @@ namespace Commander
         [Value(0, Required = false, MetaName = "folder", HelpText = "folder path or UID")]
         public string Folder { get; set; }
 
-        [Option('v', "verbose", Required = false, Default = false, HelpText = "verbose output with IDs")]
+        [Option('v', "verbose", Required = false, HelpText = "verbose output with IDs")]
         public bool Verbose { get; set; }
 
-        [Option('r', "record", Required = false, Default = false, HelpText = "show records along with folders")]
+        [Option('r', "record", Required = false, HelpText = "show records along with folders")]
         public bool Record { get; set; }
 
-        [Option('s', "shares", Required = false, Default = false, HelpText = "show shares along with folders")]
+        [Option('s', "shares", Required = false, HelpText = "show shares along with folders")]
         public bool Shares { get; set; }
 
-        [Option('h', "hide-shared-keys", Required = false, Default = false, HelpText = "hide share permissions key (valid only when used with --shares flag, which shows key by default)")]
+        [Option('h', "hide-shared-keys", Required = false, HelpText = "hide share permissions key (valid only when used with --shares flag, which shows key by default)")]
         public bool HideSharedKeys { get; set; }
     }
 
