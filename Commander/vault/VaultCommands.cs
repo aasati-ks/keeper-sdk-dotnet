@@ -341,6 +341,14 @@ namespace Commander
                     Description = "Upload file attachment",
                     Action = context.UploadAttachmentCommand
                 });
+            
+            cli.Commands.Add("delete-attachment",
+                new ParseableCommand<DeleteAttachmentOptions>
+                {
+                    Order = 25,
+                    Description = "Delete attachment",
+                    Action = context.DeleteAttachmentCommand
+                });
 
             cli.Commands.Add("mkdir",
                 new ParseableCommand<MakeFolderOptions>
@@ -499,6 +507,13 @@ namespace Commander
                     Order = 84,
                     Description = "loads Record Types to keeper from given file",
                     Action = context.RecordTypeLoadCommand
+                });
+            cli.Commands.Add("download-record-types",
+                new ParseableCommand<DownloadRecordTypeOptions>
+                {
+                    Order = 84,
+                    Description = "downloads Record Types from keeper to given file",
+                    Action = context.DownloadRecordTypes
                 });
             cli.Commands.Add("breachwatch",
                 new ParseableCommand<BreachWatchOptions>

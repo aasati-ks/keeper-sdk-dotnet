@@ -611,6 +611,113 @@ namespace Commander
             await context.Vault.UploadAttachment(record, uploadTask);
         }
 
+        public static async Task DeleteAttachmentCommand(this VaultContext context, DeleteAttachmentOptions options)
+        {
+            if (context.Vault.TryGetKeeperRecord(options.RecordName, out var record))
+            {
+            }
+            else if (context.TryResolvePath(options.RecordName, out var node, out var title))
+            {
+                foreach (var uid in node.Records)
+                {
+                    if (!context.Vault.TryGetKeeperRecord(uid, out var r)) continue;
+                    if (string.CompareOrdinal(title, r.Title) != 0) continue;
+
+                    record = r;
+                    break;
+                }
+            }
+
+            if (record == null)
+            {
+                Console.WriteLine($"Cannot resolve record {options.RecordName}");
+                return;
+            }
+
+            var attachments = context.Vault.RecordAttachments(record).ToArray();
+
+            if (attachments.Length == 0)
+            {
+                Console.WriteLine("Record has no attachments.");
+                return;
+            }
+
+            var notFoundFiles = new List<string>();
+
+            foreach (var fileName in options.FileNames.Select(f => f.Trim()))
+            {
+                var exactIdMatch = attachments.FirstOrDefault(x => string.Equals(fileName, x.Id));
+                
+                if (exactIdMatch != null)
+                {
+                    Console.WriteLine($"Deleting attachment by ID '{fileName}':");
+                    var deleteSuccess = await context.Vault.DeleteAttachment(record, exactIdMatch.Id);
+
+                    if (deleteSuccess)
+                    {
+                        Console.WriteLine($"Attachment '{exactIdMatch.Name}' (ID: {exactIdMatch.Id}) deleted successfully.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Failed to delete attachment '{exactIdMatch.Name}' (ID: {exactIdMatch.Id}).");
+                    }
+                    continue;
+                }
+
+                var attachmentsByName = attachments.Where(x =>
+                    string.Equals(fileName, x.Title, StringComparison.InvariantCultureIgnoreCase) ||
+                    string.Equals(fileName, x.Name, StringComparison.InvariantCultureIgnoreCase)
+                ).ToArray();
+
+                if (attachmentsByName.Length == 0)
+                {
+                    notFoundFiles.Add(fileName);
+                    continue;
+                }
+
+                if (attachmentsByName.Length > 1)
+                {
+                    Console.WriteLine($"Multiple attachments found with name '{fileName}'. Cannot delete by name when duplicates exist.");
+                    Console.WriteLine("Please specify the attachment ID to delete:");
+                    foreach (var att in attachmentsByName)
+                    {
+                        Console.WriteLine($"  - {att.Name} (ID: {att.Id})");
+                    }
+                    Console.WriteLine("Use the ID in the delete command to specify which attachment to delete.");
+                    continue;
+                }
+
+                var attachmentToDelete = attachmentsByName[0];
+                Console.WriteLine($"Deleting attachment '{fileName}':");
+
+                var deleteResult = await context.Vault.DeleteAttachment(record, attachmentToDelete.Id);
+
+                if (deleteResult)
+                {
+                    Console.WriteLine($"Attachment '{attachmentToDelete.Name}' (ID: {attachmentToDelete.Id}) deleted successfully.");
+                }
+                else
+                {
+                    Console.WriteLine($"Failed to delete attachment '{attachmentToDelete.Name}' (ID: {attachmentToDelete.Id}).");
+                }
+            }
+
+            if (notFoundFiles.Count > 0)
+            {
+                Console.WriteLine($"  Files not found: {string.Join(", ", notFoundFiles)}");
+
+                // Refresh the array since there is a chance that some of the attachments are removed in earlier delete attachments call
+                attachments = context.Vault.RecordAttachments(record).ToArray();
+                Console.WriteLine("\nAvailable attachments:");
+                
+                foreach (var att in attachments)
+                {
+                    Console.WriteLine($"  - {att.Name} (ID: {att.Id})");
+                }
+            }
+
+        }
+        
         public static async Task RemoveRecordCommand(this VaultContext context, RemoveRecordOptions options)
         {
             if (string.IsNullOrEmpty(options.RecordName))
@@ -817,6 +924,99 @@ namespace Commander
             Console.WriteLine($"Existing Record Types which are skipped: {(existingRecordTypeIds.Count > 0 ? string.Join(", ", existingRecordTypeIds) : "None")}");
             Console.WriteLine($"Failed Record Types: {(failedRecordTypeIds.Count > 0 ? string.Join(", ", failedRecordTypeIds) : "None")}");
             return uploadedRecordTypeIds;
+        }public static async Task DownloadRecordTypes(this VaultContext context, DownloadRecordTypeOptions options)
+        {
+            var source = options.GetValidatedSource();
+            List<InputRecordType> customRecordTypes = new();
+            var fileName = options.FileName ?? "record_types.json";
+            if (source == DownloadRecordTypeOptions.SourceType.keeper)
+            {
+                customRecordTypes = await DownloadRecordTypesExtensions.DownloadRecordTypesFromKeeper(context.Vault, options);
+            }
+            if (customRecordTypes.Count > 0)
+            {
+                var downloadRecordTypeData = new DownloadRecordType
+                {
+                    RecordTypes = customRecordTypes
+                };
+                var serializedRecordTypes = JsonUtils.DumpJson(downloadRecordTypeData);
+                try
+                {
+                    File.WriteAllBytes(fileName, serializedRecordTypes);
+                    Console.WriteLine($"Downloaded {downloadRecordTypeData.RecordTypes.Count} record types to \"{Path.GetFullPath(fileName)}\"");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to write record types to file \"{fileName}\": {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.Error.WriteLine("No record types are downloaded");
+            }
+            await context.Vault.SyncDown();
+        }
+
+        internal class DownloadRecordTypesExtensions
+        {
+            public static async Task<List<InputRecordType>> DownloadRecordTypesFromKeeper(VaultOnline vault, DownloadRecordTypeOptions options)
+            {
+                await vault.SyncDown();
+                var recordTypes = vault.RecordTypes.ToList();
+                List<InputRecordType> recordTypesForDownload = new();
+
+                foreach (var recordType in recordTypes)
+                {
+                    if (recordType.Scope != RecordTypeScope.Enterprise)
+                    {
+                        continue;
+                    }
+                    var custom = new InputRecordType
+                    {
+                        RecordTypeName = recordType.Name,
+                        Description = recordType.Description,
+                        Categories = null,
+                    };
+
+                    List<InputRecordTypeField> fieldsList = new();
+                    bool needFileRef = options.SSHFileRef;
+
+                    foreach (var field in recordType.Fields)
+                    {
+                        if (needFileRef && field.FieldName.ToString() == "keyPair")
+                        {
+                            needFileRef = true;
+                            continue;
+                        }
+                        var fieldObject = new InputRecordTypeField
+                        {
+                            Type = field.FieldName.ToString(),
+                            Label = field.FieldLabel,
+                            Required = field.Required
+                        };
+
+                        fieldsList.Add(fieldObject);
+                    }
+
+                    if (needFileRef)
+                    {
+                        bool hasFileRef = fieldsList.Any(f => f.Type == "fileRef");
+                        if (!hasFileRef)
+                        {
+                            fieldsList.Add(
+                                new InputRecordTypeField
+                                {
+                                    Type = "fileRef"
+                                }
+                                );
+                        }
+                    }
+                    custom.Fields = fieldsList;
+                    recordTypesForDownload.Add(custom);
+                }
+
+                return recordTypesForDownload;
+            }
         }
 
         public static async Task BreachWatchCommand(this VaultContext context, BreachWatchOptions options)
@@ -1279,6 +1479,13 @@ namespace Commander
             public bool? Required { get; set; }
         }
 
+        [DataContract]
+        internal class DownloadRecordType
+        {
+            [DataMember(Name = "record_types", IsRequired = true)]
+            public List<InputRecordType> RecordTypes { get; set; }
+        }
+
         private static string ExtractDataFromFile(string filePath)
         {
             var path = filePath.Substring(1).Trim('"', '(', ')', '\'');
@@ -1401,6 +1608,15 @@ namespace Commander
         public string RecordName { get; set; }
     }
 
+    class DeleteAttachmentOptions
+    {
+        [Value(0, Required = true, MetaName = "record path or uid", HelpText = "Keeper Record")]
+        public string RecordName { get; set; }
+
+        [Option('f', "file", Required = true, Separator = ',', HelpText = "Attachment filename(s) to delete. Can be used multiple times to delete multiple filenames.")]
+        public IEnumerable<string> FileNames { get; set; }
+    }
+    
     class RemoveRecordOptions
     {
         [Value(0, Required = true, MetaName = "record title, uid, or pattern", HelpText = "remove records")]
@@ -1513,6 +1729,32 @@ namespace Commander
     {
         [Value(0, Required = true, Default = false, HelpText = "File path to load record type from")]
         public string filePath { get; set; }
+    }
+
+    class DownloadRecordTypeOptions
+    {
+        [Value(0, Required = true, Default = false, HelpText = "Source to download record types from. Currently supported sources are: \"keeper\"")]
+        public string Source { get; set; }
+
+        [Option("file-name", Required = false, Default = null, HelpText = "file-name to store the downloaded record types in. default is record-types.json")]
+        public string FileName { get; set; }
+
+        [Option("ssh-key-as-file", Required = false, Default = false, HelpText = "Prefer store SSH keys as file attachments rather than fields on a record")]
+        public bool SSHFileRef { get; set; }
+
+        public enum SourceType
+        {
+            keeper
+        }
+
+        public SourceType GetValidatedSource()
+        {
+            if (Enum.TryParse<SourceType>(Source, ignoreCase: true, out var parsed))
+            {
+                return parsed;
+            }
+            throw new ArgumentException($"Unsupported source type: {Source}. Supported sources are: {string.Join(", ", Enum.GetNames(typeof(SourceType)))}");
+        }
     }
 
     class BreachWatchOptions

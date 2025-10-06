@@ -22,8 +22,12 @@ To run the PowerCommander module from the source copy PowerCommander\ directory 
 | Get-KeeperSharedFolder                 | ksf         | Enumerate all shared folders
 | Add-KeeperRecord                       | kadd        | Add/Modify Keeper record
 | Get-KeeperRecordPassword               |             | Get password of a keeper record if present 
-| Import-KeeperRecordTypes               |             | Load Keeper records from a given file
 | Get-KeeperRecordType                   | krti        | Get Record Type Information
+| New-KeeperRecordType                   |             | Creates a new custom record type
+| Edit-KeeperRecordType                  |             | Modifies the existing custom record type
+| Remove-KeeperRecordType                |             | Removes the custom record type
+| Import-KeeperRecordTypes               |             | loads new custom record types from file
+| Export-KeeperRecordTypes               |             | exports custom record types from keeper to a file
 | Remove-KeeperRecord                    | kdel        | Delete Keeper record
 | Move-RecordToFolder                    | kmv         | Move records to Keeper folder
 | Add-KeeperFolder                       | kmkdir      | Create Keeper folder
@@ -41,6 +45,16 @@ To run the PowerCommander module from the source copy PowerCommander\ directory 
 | Edit-KeeperRecordType                  |             | Modifies the existing custom record type
 | Remove-KeeperRecordType                |             | Removes the custom record type
 | Get-KeeperPasswordReport               |             | Retrieves password report based on policy and strengths
+
+### Biometric Cmdlets
+| Cmdlet name                            | Alias       | Description
+|----------------------------------------|-------------|----------------------------
+| Assert-KeeperBiometricCredential       |             | Checks if a biometric credential exists for the current user
+| Register-KeeperBiometricCredential     |             | Registers a new biometric credential (Windows Hello/WebAuthn)
+| Show-KeeperBiometricCredentials        |             | Lists all biometric credentials registered for the current user
+| Unregister-KeeperBiometricCredential   |             | Removes a biometric credential from the current user 
+[Biometric Login Command Reference](https://app.gitbook.com/o/-LO5CAzoigGmCWBUbw9z/s/-MJXOXEifAmpyvNVL1to/~/changes/1716/commander-sdk/keeper-commander-sdks/command-reference/login-commands/biometric-login)
+
 
 ### Sharing Cmdlets
 | Cmdlet name                            | Alias       | Description
